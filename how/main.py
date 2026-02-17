@@ -2,7 +2,8 @@ import sys
 import os
 import threading
 import time
-import google.generativeai as genai
+from google import genai 
+from google.genai import types
 import getpass
 import platform
 import pyperclip
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = os.path.expanduser("~/.how-cli")
 API_KEY_FILE = os.path.join(CONFIG_DIR, ".google_api_key")
 HISTORY_FILE = os.path.join(CONFIG_DIR, "history.log")
-MODEL_NAME = os.getenv("HOW_MODEL", "models/gemini-2.5-flash-lite")
+MODEL_NAME = os.getenv("HOW_MODEL", "models/gemini-3-flash-preview")
 
 
 class ApiError(Exception): pass
@@ -32,7 +33,8 @@ def header():
         "   __             \n"
         "  / /  ___ _    __\n"
         " / _ \\/ _ \\ |/|/ /\n"
-        "/_//_/\\___/__,__/ \n"
+        "/_//_/\\___/__4__/ \n" 
+        "\n"
     )
     print("Ask me how to do anything in your terminal!")
 
@@ -124,8 +126,7 @@ def get_or_create_api_key(force_reenter=False) -> str:
 
 
 def generate_response(api_key: str, prompt: str, silent: bool=False, max_retries: int=3) -> str:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(MODEL_NAME)
+    client = genai.Client(api_key=api_key)
     stop_event = threading.Event()
     spinner_thread = None
     if not silent:
@@ -137,16 +138,16 @@ def generate_response(api_key: str, prompt: str, silent: bool=False, max_retries
         for attempt in range(max_retries):
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(model.generate_content, prompt, request_options={"timeout": TIMEOUT})
+                    future = executor.submit(client.models.generate_content, model=MODEL_NAME, contents=prompt)
                     response = future.result(timeout=TIMEOUT+5)
                 text = (response.text or "").strip()
                 if not text:
-                    if getattr(response, "prompt_feedback", None) and getattr(response.prompt_feedback, "block_reason", None):
-                        raise ContentError(f"Blocked: {response.prompt_feedback.block_reason.name}")
                     raise ContentError("Empty response from API.")
                 return text
-            except (genai.types.BlockedPromptException, genai.types.StopCandidateException) as e:
-                raise ContentError("Content blocked or stopped early.") from e
+            except Exception as e:
+                if "blocked" in str(e).lower() or "stopped" in str(e).lower():
+                    raise ContentError("Content blocked or stopped early.") from e
+                raise
             except concurrent.futures.TimeoutError:
                 if attempt == max_retries-1: raise ApiTimeoutError("API request timed out.") 
                 time.sleep(2**attempt)
